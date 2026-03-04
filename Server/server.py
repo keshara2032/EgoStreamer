@@ -28,6 +28,11 @@ PORT = int(os.environ.get("PORT", "8080"))
 DISPLAY_VIDEO = os.environ.get("DISPLAY_VIDEO", "1") == "1"
 PRINT_QR = os.environ.get("PRINT_QR", "1") == "1"
 SEND_MOCK_BBOX = os.environ.get("SEND_MOCK_BBOX", "0") == "1"
+_send_mock_feedback_env = os.environ.get("SEND_MOCK_FEEDBACK")
+if _send_mock_feedback_env is None:
+    SEND_MOCK_FEEDBACK = SEND_MOCK_BBOX
+else:
+    SEND_MOCK_FEEDBACK = _send_mock_feedback_env == "1"
 DETECTION_CHANNEL_LABEL = os.environ.get("DETECTION_CHANNEL_LABEL", "detections")
 PLAY_AUDIO = os.environ.get("PLAY_AUDIO", "0") == "1"
 FORCE_AUDIO_CHANNELS = int(os.environ.get("FORCE_AUDIO_CHANNELS", "0") or "0")
@@ -472,6 +477,51 @@ async def play_audio(track):
         if recorder is not None:
             recorder.close()
 
+async def send_mock_feedback(channel):
+    protocols = [
+        "Maintain safe distance",
+        "Watch cross-traffic",
+        "Stop and scan",
+        "Stay centered",
+    ]
+    actions = [
+        "Turn left",
+        "Turn right",
+        "Slow down",
+        "Proceed forward",
+    ]
+    assistance = [
+        "Need extra light",
+        "Hold camera steady",
+        "Move closer",
+        "Check blind spot",
+    ]
+    try:
+        while channel.readyState == "open":
+            send_all = random.random() < 0.5
+            feedback = {}
+            if send_all:
+                feedback = {
+                    "protocol": random.choice(protocols),
+                    "action": random.choice(actions),
+                    "assistance": random.choice(assistance),
+                }
+            else:
+                kind = random.choice(["protocol", "action", "assistance"])
+                if kind == "protocol":
+                    feedback["protocol"] = random.choice(protocols)
+                elif kind == "action":
+                    feedback["action"] = random.choice(actions)
+                else:
+                    feedback["assistance"] = random.choice(assistance)
+            payload = {
+                "type": "feedback",
+                "feedback": feedback,
+            }
+            channel.send(json.dumps(payload))
+            await asyncio.sleep(1.0)
+    except Exception as exc:
+        logging.info(f"DataChannel sender stopped: {exc}")
 
 async def send_mock_bboxes(channel):
     frame_id = 0
@@ -508,6 +558,11 @@ def attach_datachannel_handlers(channel):
 
     if SEND_MOCK_BBOX and channel.label == DETECTION_CHANNEL_LABEL:
         task = asyncio.create_task(send_mock_bboxes(channel))
+        data_tasks.add(task)
+        task.add_done_callback(data_tasks.discard)
+
+    if SEND_MOCK_FEEDBACK and channel.label == DETECTION_CHANNEL_LABEL:
+        task = asyncio.create_task(send_mock_feedback(channel))
         data_tasks.add(task)
         task.add_done_callback(data_tasks.discard)
 

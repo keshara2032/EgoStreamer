@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,7 +23,7 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     private lateinit var overlayView: OverlayView
     private lateinit var statusText: TextView
     private lateinit var wsUrlInput: EditText
-    private lateinit var scanButton: Button
+    private lateinit var scanButton: ImageButton
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
 
@@ -125,6 +126,7 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         webRtcClient?.close()
         webRtcClient = null
         overlayView.setBoxes(emptyList())
+        overlayView.setFeedback(null)
         updateStatus("Disconnected")
         updateUiState(isStreaming = false)
     }
@@ -132,24 +134,37 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     private fun handleDataMessage(payload: String) {
         try {
             val json = JSONObject(payload)
-            if (json.optString("type") != "bbox") return
-
-            val boxesJson = json.optJSONArray("boxes") ?: return
-            val boxes = mutableListOf<OverlayView.Box>()
-            for (i in 0 until boxesJson.length()) {
-                val box = boxesJson.optJSONObject(i) ?: continue
-                boxes.add(
-                    OverlayView.Box(
-                        x = box.optDouble("x", 0.0).toFloat(),
-                        y = box.optDouble("y", 0.0).toFloat(),
-                        w = box.optDouble("w", 0.0).toFloat(),
-                        h = box.optDouble("h", 0.0).toFloat(),
-                        label = box.optString("label", ""),
-                        score = box.optDouble("score", 0.0).toFloat()
+            val type = json.optString("type")
+            
+            when (type) {
+                "bbox" -> {
+                    val boxesJson = json.optJSONArray("boxes") ?: return
+                    val boxes = mutableListOf<OverlayView.Box>()
+                    for (i in 0 until boxesJson.length()) {
+                        val box = boxesJson.optJSONObject(i) ?: continue
+                        boxes.add(
+                            OverlayView.Box(
+                                x = box.optDouble("x", 0.0).toFloat(),
+                                y = box.optDouble("y", 0.0).toFloat(),
+                                w = box.optDouble("w", 0.0).toFloat(),
+                                h = box.optDouble("h", 0.0).toFloat(),
+                                label = box.optString("label", ""),
+                                score = box.optDouble("score", 0.0).toFloat()
+                            )
+                        )
+                    }
+                    runOnUiThread { overlayView.setBoxes(boxes) }
+                }
+                "feedback" -> {
+                    val feedbackJson = json.optJSONObject("feedback") ?: return
+                    val feedback = OverlayView.Feedback(
+                        protocol = feedbackJson.optString("protocol", ""),
+                        action = feedbackJson.optString("action", ""),
+                        assistance = feedbackJson.optString("assistance", "")
                     )
-                )
+                    runOnUiThread { overlayView.setFeedback(feedback) }
+                }
             }
-            runOnUiThread { overlayView.setBoxes(boxes) }
         } catch (exc: Exception) {
             updateStatus("Data parse error")
         }
