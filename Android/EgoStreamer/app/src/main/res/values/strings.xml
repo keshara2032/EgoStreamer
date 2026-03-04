@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">EgoStreamer</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connected">Connected</string>
+    <string name="scan_qr">Scan QR</string>
+    <string name="start_streaming">Start</string>
+    <string name="stop_streaming">Stop</string>
+    <string name="ws_url_hint">ws://host:8080/ws</string>
+</resources>
