@@ -1,8 +1,12 @@
 package com.egostreamer.app
 
 import android.Manifest
+import android.content.Context
+import android.content.res.ColorStateList
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
@@ -19,6 +23,11 @@ import org.webrtc.SurfaceViewRenderer
 
 class MainActivity : AppCompatActivity(), SignalingClient.Listener {
 
+    companion object {
+        private const val PREFS_NAME = "egostreamer_prefs"
+        private const val KEY_WS_URL = "saved_ws_url"
+    }
+
     private lateinit var previewView: SurfaceViewRenderer
     private lateinit var overlayView: OverlayView
     private lateinit var statusText: TextView
@@ -30,6 +39,7 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     private var webRtcClient: WebRtcClient? = null
     private var signalingClient: SignalingClient? = null
     private var isStreaming = false
+    private val prefs by lazy { getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -43,9 +53,15 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     }
 
     private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
-        val contents = result.contents
-        if (contents != null) {
-            wsUrlInput.setText(contents)
+        val contents = result.contents?.trim().orEmpty()
+        if (contents.isNotEmpty()) {
+            if (isValidWebSocketUrl(contents)) {
+                wsUrlInput.setText(contents)
+                saveServerUrl(contents)
+                lockToLandscape()
+            } else {
+                toast("QR code must contain a valid ws:// or wss:// URL")
+            }
         }
     }
 
@@ -65,13 +81,14 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         startButton.setOnClickListener { startStreaming() }
         stopButton.setOnClickListener { stopStreaming() }
 
+        restoreSavedServerUrl()
         updateStatus("Disconnected")
         updateUiState(isStreaming = false)
     }
 
     override fun onDestroy() {
+        releaseStreamingResources()
         super.onDestroy()
-        stopStreaming()
     }
 
     private fun startQrScan() {
@@ -87,7 +104,7 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         if (isStreaming) return
 
         val url = wsUrlInput.text.toString().trim()
-        if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+        if (!isValidWebSocketUrl(url)) {
             toast("Please enter a valid ws:// or wss:// URL")
             return
         }
@@ -97,7 +114,8 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
             return
         }
 
-        webRtcClient?.close()
+        lockToLandscape()
+        releaseStreamingResources()
         webRtcClient = WebRtcClient(
             context = this,
             previewView = previewView,
@@ -112,7 +130,6 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
             }
         )
 
-        signalingClient?.close()
         signalingClient = SignalingClient(url, this)
         signalingClient?.connect()
         updateStatus("Connecting")
@@ -120,13 +137,8 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     }
 
     private fun stopStreaming() {
-        if (!isStreaming) return
-        signalingClient?.close()
-        signalingClient = null
-        webRtcClient?.close()
-        webRtcClient = null
-        overlayView.setBoxes(emptyList())
-        overlayView.setFeedback(null)
+        releaseStreamingResources()
+        clearOverlay()
         updateStatus("Disconnected")
         updateUiState(isStreaming = false)
     }
@@ -194,8 +206,22 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     private fun updateUiState(isStreaming: Boolean) {
         this.isStreaming = isStreaming
         runOnUiThread {
-            startButton.isEnabled = !isStreaming
-            stopButton.isEnabled = isStreaming
+            if (isStreaming) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+
+            setButtonEnabledState(
+                button = startButton,
+                enabled = !isStreaming,
+                enabledColorRes = R.color.uva_orange
+            )
+            setButtonEnabledState(
+                button = stopButton,
+                enabled = isStreaming,
+                enabledColorRes = R.color.uva_blue
+            )
             scanButton.isEnabled = !isStreaming
             wsUrlInput.isEnabled = !isStreaming
         }
@@ -223,12 +249,58 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     }
 
     override fun onDisconnected() {
-        updateStatus("Disconnected")
-        updateUiState(isStreaming = false)
+        stopStreaming()
     }
 
     override fun onError(message: String) {
+        releaseStreamingResources()
+        clearOverlay()
         updateStatus("Error: $message")
         updateUiState(isStreaming = false)
+    }
+
+    private fun restoreSavedServerUrl() {
+        val savedUrl = prefs.getString(KEY_WS_URL, null)?.trim().orEmpty()
+        if (savedUrl.isNotEmpty()) {
+            wsUrlInput.setText(savedUrl)
+            lockToLandscape()
+        }
+    }
+
+    private fun saveServerUrl(url: String) {
+        prefs.edit().putString(KEY_WS_URL, url).apply()
+    }
+
+    private fun isValidWebSocketUrl(url: String): Boolean {
+        return url.startsWith("ws://") || url.startsWith("wss://")
+    }
+
+    private fun lockToLandscape() {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+    }
+
+    private fun releaseStreamingResources() {
+        val signaling = signalingClient
+        signalingClient = null
+        signaling?.close()
+
+        val rtcClient = webRtcClient
+        webRtcClient = null
+        rtcClient?.close()
+    }
+
+    private fun clearOverlay() {
+        runOnUiThread {
+            overlayView.setBoxes(emptyList())
+            overlayView.setFeedback(null)
+        }
+    }
+
+    private fun setButtonEnabledState(button: Button, enabled: Boolean, enabledColorRes: Int) {
+        button.isEnabled = enabled
+        val colorRes = if (enabled) enabledColorRes else R.color.button_disabled
+        button.backgroundTintList = ColorStateList.valueOf(
+            ContextCompat.getColor(this, colorRes)
+        )
     }
 }

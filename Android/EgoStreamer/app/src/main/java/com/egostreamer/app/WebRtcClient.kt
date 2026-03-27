@@ -12,8 +12,12 @@ import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
+import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpCapabilities
+import org.webrtc.RtpParameters
+import org.webrtc.RtpSender
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
@@ -21,6 +25,7 @@ import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import java.util.Locale
 
 class WebRtcClient(
     private val context: Context,
@@ -39,6 +44,7 @@ class WebRtcClient(
     private var audioSource: AudioSource? = null
     private var videoTrack: VideoTrack? = null
     private var audioTrack: AudioTrack? = null
+    private var videoSender: RtpSender? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
 
     init {
@@ -62,6 +68,14 @@ class WebRtcClient(
     }
 
     companion object {
+        private const val TAG = "WebRtcClient"
+        private const val REQUESTED_CAPTURE_WIDTH = 1280
+        private const val REQUESTED_CAPTURE_HEIGHT = 720
+        private const val REQUESTED_CAPTURE_FPS = 30
+        private const val MIN_VIDEO_BITRATE_BPS = 1_500_000
+        private const val MAX_VIDEO_BITRATE_BPS = 4_000_000
+        private const val HIGH_BITRATE_PRIORITY = 4.0
+
         @Volatile
         private var initialized = false
 
@@ -127,7 +141,7 @@ class WebRtcClient(
             override fun onBufferedAmountChange(previousAmount: Long) {}
 
             override fun onStateChange() {
-                Log.d("WebRtcClient", "DataChannel state: ${channel.state()}")
+                Log.d(TAG, "DataChannel state: ${channel.state()}")
             }
 
             override fun onMessage(buffer: DataChannel.Buffer) {
@@ -146,6 +160,11 @@ class WebRtcClient(
         videoCapturer = createCameraCapturer()
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
         videoSource = peerConnectionFactory.createVideoSource(false)
+        videoSource?.adaptOutputFormat(
+            REQUESTED_CAPTURE_WIDTH,
+            REQUESTED_CAPTURE_HEIGHT,
+            REQUESTED_CAPTURE_FPS
+        )
         videoCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
         videoTrack = peerConnectionFactory.createVideoTrack("video_track", videoSource)
         videoTrack?.addSink(previewView)
@@ -153,13 +172,19 @@ class WebRtcClient(
         audioSource = peerConnectionFactory.createAudioSource(MediaConstraints())
         audioTrack = peerConnectionFactory.createAudioTrack("audio_track", audioSource)
 
-        peerConnection?.addTrack(videoTrack, listOf("stream"))
+        videoSender = peerConnection?.addTrack(videoTrack, listOf("stream"))
         peerConnection?.addTrack(audioTrack, listOf("stream"))
+        configureVideoTransceiver()
+        applyVideoSenderConstraints("initial")
 
         try {
-            videoCapturer?.startCapture(1280, 720, 30)
+            videoCapturer?.startCapture(
+                REQUESTED_CAPTURE_WIDTH,
+                REQUESTED_CAPTURE_HEIGHT,
+                REQUESTED_CAPTURE_FPS
+            )
         } catch (exc: Exception) {
-            Log.e("WebRtcClient", "Failed to start capture: ${exc.message}")
+            Log.e(TAG, "Failed to start capture: ${exc.message}")
         }
     }
 
@@ -169,11 +194,11 @@ class WebRtcClient(
             val rate = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
             val frames = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
             Log.i(
-                "WebRtcClient",
+                TAG,
                 "DEVICE_AUDIO_RATE: sampleRate=$rate, framesPerBuffer=$frames"
             )
         } catch (exc: Exception) {
-            Log.w("WebRtcClient", "DEVICE_AUDIO_RATE: failed to query (${exc.message})")
+            Log.w(TAG, "DEVICE_AUDIO_RATE: failed to query (${exc.message})")
         }
     }
 
@@ -184,13 +209,17 @@ class WebRtcClient(
         for (name in deviceNames) {
             if (enumerator.isBackFacing(name)) {
                 val capturer = enumerator.createCapturer(name, null)
-                if (capturer != null) return capturer
+                if (capturer != null) {
+                    return capturer
+                }
             }
         }
 
         for (name in deviceNames) {
             val capturer = enumerator.createCapturer(name, null)
-            if (capturer != null) return capturer
+            if (capturer != null) {
+                return capturer
+            }
         }
         return null
     }
@@ -204,14 +233,14 @@ class WebRtcClient(
                         onOfferReady(sdp.description)
                     }
                     override fun onSetFailure(error: String) {
-                        Log.e("WebRtcClient", "setLocalDescription failed: $error")
+                        Log.e(TAG, "setLocalDescription failed: $error")
                     }
                     override fun onCreateSuccess(sdp: SessionDescription) {}
                     override fun onCreateFailure(error: String) {}
                 }, sdp)
             }
             override fun onCreateFailure(error: String) {
-                Log.e("WebRtcClient", "createOffer failed: $error")
+                Log.e(TAG, "createOffer failed: $error")
             }
             override fun onSetSuccess() {}
             override fun onSetFailure(error: String) {}
@@ -221,9 +250,11 @@ class WebRtcClient(
     fun setRemoteDescription(sdp: String) {
         val desc = SessionDescription(SessionDescription.Type.ANSWER, sdp)
         peerConnection?.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() {}
+            override fun onSetSuccess() {
+                applyVideoSenderConstraints("remote_description_set")
+            }
             override fun onSetFailure(error: String) {
-                Log.e("WebRtcClient", "setRemoteDescription failed: $error")
+                Log.e(TAG, "setRemoteDescription failed: $error")
             }
             override fun onCreateSuccess(sdp: SessionDescription) {}
             override fun onCreateFailure(error: String) {}
@@ -239,6 +270,7 @@ class WebRtcClient(
             videoCapturer?.stopCapture()
         } catch (_: Exception) {
         }
+        videoSender = null
         videoCapturer?.dispose()
         videoSource?.dispose()
         audioSource?.dispose()
@@ -247,5 +279,76 @@ class WebRtcClient(
         peerConnection?.close()
         peerConnection?.dispose()
         eglBase.release()
+    }
+
+    private fun configureVideoTransceiver() {
+        val sender = videoSender ?: return
+        val transceiver = peerConnection
+            ?.getTransceivers()
+            ?.firstOrNull { it.sender.id() == sender.id() }
+            ?: return
+
+        val capabilities = peerConnectionFactory
+            .getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO)
+            .codecs
+            .orEmpty()
+        if (capabilities.isEmpty()) return
+
+        val orderedCodecs = capabilities.sortedBy { codecPreferenceRank(it) }
+        try {
+            transceiver.setCodecPreferences(orderedCodecs)
+        } catch (exc: Exception) {
+            Log.w(TAG, "Failed to set codec preferences: ${exc.message}")
+        }
+    }
+
+    private fun applyVideoSenderConstraints(reason: String) {
+        val sender = videoSender ?: return
+        val parameters = try {
+            sender.parameters
+        } catch (exc: Exception) {
+            Log.w(TAG, "Failed to get video sender parameters ($reason): ${exc.message}")
+            return
+        }
+
+        if (parameters.encodings.isEmpty()) return
+
+        parameters.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+        parameters.encodings.forEach { encoding ->
+            encoding.minBitrateBps = MIN_VIDEO_BITRATE_BPS
+            encoding.maxBitrateBps = MAX_VIDEO_BITRATE_BPS
+            encoding.maxFramerate = REQUESTED_CAPTURE_FPS
+            encoding.scaleResolutionDownBy = 1.0
+            encoding.bitratePriority = HIGH_BITRATE_PRIORITY
+        }
+
+        val applied = try {
+            sender.setParameters(parameters)
+        } catch (exc: Exception) {
+            Log.w(TAG, "Failed to set video sender parameters ($reason): ${exc.message}")
+            false
+        }
+        if (!applied) {
+            Log.w(TAG, "Video sender parameters were not applied ($reason)")
+        }
+    }
+
+    private fun codecPreferenceRank(codec: RtpCapabilities.CodecCapability): Int {
+        return when (codecMimeType(codec)) {
+            "video/h264" -> 0
+            "video/vp8" -> 1
+            "video/vp9" -> 2
+            "video/av1" -> 3
+            "video/red" -> 10
+            "video/ulpfec" -> 11
+            "video/flexfec-03" -> 12
+            "video/rtx" -> 13
+            else -> 20
+        }
+    }
+
+    private fun codecMimeType(codec: RtpCapabilities.CodecCapability): String {
+        return (codec.mimeType.ifBlank { "${codec.kind.name.lowercase(Locale.US)}/${codec.name}" })
+            .lowercase(Locale.US)
     }
 }
