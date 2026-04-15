@@ -30,6 +30,7 @@ import java.util.Locale
 class WebRtcClient(
     private val context: Context,
     private val previewView: SurfaceViewRenderer,
+    private val showLocalPreview: Boolean,
     private val onIceCandidateReady: (IceCandidate) -> Unit,
     private val onDataMessage: (String) -> Unit,
     private val onConnectionState: (PeerConnection.PeerConnectionState) -> Unit
@@ -62,7 +63,9 @@ class WebRtcClient(
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
 
-        setupPreview()
+        if (showLocalPreview) {
+            setupPreview()
+        }
         createPeerConnection()
         startLocalMedia()
     }
@@ -167,7 +170,9 @@ class WebRtcClient(
         )
         videoCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
         videoTrack = peerConnectionFactory.createVideoTrack("video_track", videoSource)
-        videoTrack?.addSink(previewView)
+        if (showLocalPreview) {
+            videoTrack?.addSink(previewView)
+        }
 
         audioSource = peerConnectionFactory.createAudioSource(MediaConstraints())
         audioTrack = peerConnectionFactory.createAudioTrack("audio_track", audioSource)
@@ -275,7 +280,9 @@ class WebRtcClient(
         videoSource?.dispose()
         audioSource?.dispose()
         surfaceTextureHelper?.dispose()
-        previewView.release()
+        if (showLocalPreview) {
+            previewView.release()
+        }
         peerConnection?.close()
         peerConnection?.dispose()
         eglBase.release()

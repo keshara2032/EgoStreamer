@@ -6,4 +6,6 @@
     <string name="start_streaming">Start</string>
     <string name="stop_streaming">Stop</string>
     <string name="ws_url_hint">ws://host:8080/ws</string>
+    <string name="scan_server_prompt">Scan the server QR code</string>
+    <string name="scan_required_message">Scan a QR code to set the server before starting.</string>
 </resources>

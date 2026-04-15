@@ -2,19 +2,19 @@ package com.egostreamer.app
 
 import android.Manifest
 import android.content.Context
-import android.content.res.ColorStateList
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
+import android.view.View
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.button.MaterialButton
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import org.json.JSONObject
@@ -24,21 +24,23 @@ import org.webrtc.SurfaceViewRenderer
 class MainActivity : AppCompatActivity(), SignalingClient.Listener {
 
     companion object {
+        private const val TAG = "EgoStreamer"
         private const val PREFS_NAME = "egostreamer_prefs"
         private const val KEY_WS_URL = "saved_ws_url"
     }
 
     private lateinit var previewView: SurfaceViewRenderer
     private lateinit var overlayView: OverlayView
+    private lateinit var rootLayout: View
     private lateinit var statusText: TextView
-    private lateinit var wsUrlInput: EditText
-    private lateinit var scanButton: ImageButton
-    private lateinit var startButton: Button
-    private lateinit var stopButton: Button
+    private lateinit var scanButton: MaterialButton
+    private lateinit var startButton: MaterialButton
+    private lateinit var stopButton: MaterialButton
 
     private var webRtcClient: WebRtcClient? = null
     private var signalingClient: SignalingClient? = null
     private var isStreaming = false
+    private var serverUrl = ""
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
     private val permissionLauncher = registerForActivityResult(
@@ -56,11 +58,12 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         val contents = result.contents?.trim().orEmpty()
         if (contents.isNotEmpty()) {
             if (isValidWebSocketUrl(contents)) {
-                wsUrlInput.setText(contents)
-                saveServerUrl(contents)
+                setServerUrl(contents, persist = true)
                 lockToLandscape()
+                startButton.post { startButton.requestFocus() }
             } else {
                 toast("QR code must contain a valid ws:// or wss:// URL")
+                scanButton.requestFocus()
             }
         }
     }
@@ -69,13 +72,14 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        rootLayout = findViewById(R.id.root_layout)
         previewView = findViewById(R.id.preview_view)
         overlayView = findViewById(R.id.overlay_view)
         statusText = findViewById(R.id.status_text)
-        wsUrlInput = findViewById(R.id.ws_url_input)
         scanButton = findViewById(R.id.scan_button)
         startButton = findViewById(R.id.start_button)
         stopButton = findViewById(R.id.stop_button)
+        applyPreviewMode()
 
         scanButton.setOnClickListener { startQrScan() }
         startButton.setOnClickListener { startStreaming() }
@@ -93,7 +97,7 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
 
     private fun startQrScan() {
         val options = ScanOptions().apply {
-            setPrompt("Scan server QR")
+            setPrompt(getString(R.string.scan_server_prompt))
             setBeepEnabled(true)
             setOrientationLocked(false)
         }
@@ -103,9 +107,10 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     private fun startStreaming() {
         if (isStreaming) return
 
-        val url = wsUrlInput.text.toString().trim()
+        val url = serverUrl.trim()
         if (!isValidWebSocketUrl(url)) {
-            toast("Please enter a valid ws:// or wss:// URL")
+            toast(getString(R.string.scan_required_message))
+            scanButton.requestFocus()
             return
         }
 
@@ -119,6 +124,7 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         webRtcClient = WebRtcClient(
             context = this,
             previewView = previewView,
+            showLocalPreview = shouldShowLocalPreview(),
             onIceCandidateReady = { candidate ->
                 signalingClient?.sendCandidate(candidate)
             },
@@ -147,6 +153,9 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         try {
             val json = JSONObject(payload)
             val type = json.optString("type")
+            Log.i(TAG, "Received message. Raw payload: $payload")
+
+
             
             when (type) {
                 "bbox" -> {
@@ -168,11 +177,12 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
                     runOnUiThread { overlayView.setBoxes(boxes) }
                 }
                 "feedback" -> {
+                    Log.i(TAG, "Received feedback message. Raw payload: $payload")
                     val feedbackJson = json.optJSONObject("feedback") ?: return
+
                     val feedback = OverlayView.Feedback(
                         protocol = feedbackJson.optString("protocol", ""),
-                        action = feedbackJson.optString("action", ""),
-                        assistance = feedbackJson.optString("assistance", "")
+                        action = feedbackJson.optString("action", "")
                     )
                     runOnUiThread { overlayView.setFeedback(feedback) }
                 }
@@ -203,6 +213,17 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         }
     }
 
+    private fun shouldShowLocalPreview(): Boolean {
+        return resources.getBoolean(R.bool.show_local_camera_preview)
+    }
+
+    private fun applyPreviewMode() {
+        val showLocalPreview = shouldShowLocalPreview()
+        previewView.visibility = if (showLocalPreview) View.VISIBLE else View.INVISIBLE
+        val backgroundColor = if (showLocalPreview) R.color.uva_blue else R.color.black
+        rootLayout.setBackgroundColor(ContextCompat.getColor(this, backgroundColor))
+    }
+
     private fun updateUiState(isStreaming: Boolean) {
         this.isStreaming = isStreaming
         runOnUiThread {
@@ -214,16 +235,14 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
 
             setButtonEnabledState(
                 button = startButton,
-                enabled = !isStreaming,
-                enabledColorRes = R.color.uva_orange
+                enabled = !isStreaming
             )
             setButtonEnabledState(
                 button = stopButton,
-                enabled = isStreaming,
-                enabledColorRes = R.color.uva_blue
+                enabled = isStreaming
             )
             scanButton.isEnabled = !isStreaming
-            wsUrlInput.isEnabled = !isStreaming
+            focusPrimaryAction()
         }
     }
 
@@ -262,17 +281,31 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
     private fun restoreSavedServerUrl() {
         val savedUrl = prefs.getString(KEY_WS_URL, null)?.trim().orEmpty()
         if (savedUrl.isNotEmpty()) {
-            wsUrlInput.setText(savedUrl)
+            setServerUrl(savedUrl, persist = false)
             lockToLandscape()
+        } else {
+            setServerUrl("", persist = false)
         }
     }
 
-    private fun saveServerUrl(url: String) {
-        prefs.edit().putString(KEY_WS_URL, url).apply()
+    private fun setServerUrl(url: String, persist: Boolean) {
+        serverUrl = url
+        if (persist) {
+            prefs.edit().putString(KEY_WS_URL, url).apply()
+        }
     }
 
     private fun isValidWebSocketUrl(url: String): Boolean {
         return url.startsWith("ws://") || url.startsWith("wss://")
+    }
+
+    private fun focusPrimaryAction() {
+        val target = when {
+            isStreaming -> stopButton
+            serverUrl.isBlank() -> scanButton
+            else -> startButton
+        }
+        target.post { target.requestFocus() }
     }
 
     private fun lockToLandscape() {
@@ -296,11 +329,7 @@ class MainActivity : AppCompatActivity(), SignalingClient.Listener {
         }
     }
 
-    private fun setButtonEnabledState(button: Button, enabled: Boolean, enabledColorRes: Int) {
+    private fun setButtonEnabledState(button: Button, enabled: Boolean) {
         button.isEnabled = enabled
-        val colorRes = if (enabled) enabledColorRes else R.color.button_disabled
-        button.backgroundTintList = ColorStateList.valueOf(
-            ContextCompat.getColor(this, colorRes)
-        )
     }
 }

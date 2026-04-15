@@ -72,13 +72,15 @@ python server.py
 The server listens on `http://0.0.0.0:8080` and accepts WebSocket signaling at `ws://<host>:8080/ws`.
 It also prints a QR code that encodes the WebSocket URL so your phone can scan it.
 
+Run `python server.py --help` to see the available flags.
+
 If the QR code shows the wrong IP (multiple network interfaces), set:
 ```bash
-SERVER_BASE_URL=http://<your-lan-ip>:8080 python server.py
+python server.py --server-base-url http://<your-lan-ip>:8080
 ```
 You can disable the QR code with:
 ```bash
-PRINT_QR=0 python server.py
+python server.py --no-print-qr
 ```
 
 ## Run the simulator (macOS capture)
@@ -108,13 +110,13 @@ and enable your terminal app.
 
 You can disable the GUI window:
 ```bash
-DISPLAY_VIDEO=0 python server.py
+python server.py --no-display-video
 ```
 
 ## Optional: play audio on the server
 If you want to hear the incoming audio on the server, enable playback:
 ```bash
-PLAY_AUDIO=1 python server.py
+python server.py --play-audio
 ```
 
 This requires `sounddevice` + PortAudio:
@@ -150,7 +152,7 @@ connection using a DataChannel.
 
 To send mock boxes from the server for testing:
 ```bash
-SEND_MOCK_BBOX=1 python server.py
+python server.py --send-mock-bbox
 ```
 
 ## WebSocket signaling protocol (current)

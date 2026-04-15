@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 import logging
@@ -23,24 +24,145 @@ video_tasks = set()
 audio_tasks = set()
 data_tasks = set()
 
+
+def env_bool(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8080"))
-DISPLAY_VIDEO = os.environ.get("DISPLAY_VIDEO", "1") == "1"
-PRINT_QR = os.environ.get("PRINT_QR", "1") == "1"
-SEND_MOCK_BBOX = os.environ.get("SEND_MOCK_BBOX", "0") == "1"
+SERVER_BASE_URL = os.environ.get("SERVER_BASE_URL", "").strip() or None
+DISPLAY_VIDEO = env_bool("DISPLAY_VIDEO", True)
+PRINT_QR = env_bool("PRINT_QR", True)
+SEND_MOCK_BBOX = env_bool("SEND_MOCK_BBOX", False)
 _send_mock_feedback_env = os.environ.get("SEND_MOCK_FEEDBACK")
 if _send_mock_feedback_env is None:
     SEND_MOCK_FEEDBACK = SEND_MOCK_BBOX
 else:
-    SEND_MOCK_FEEDBACK = _send_mock_feedback_env == "1"
+    SEND_MOCK_FEEDBACK = env_bool("SEND_MOCK_FEEDBACK", SEND_MOCK_BBOX)
 DETECTION_CHANNEL_LABEL = os.environ.get("DETECTION_CHANNEL_LABEL", "detections")
-PLAY_AUDIO = os.environ.get("PLAY_AUDIO", "0") == "1"
+PLAY_AUDIO = env_bool("PLAY_AUDIO", False)
 FORCE_AUDIO_CHANNELS = int(os.environ.get("FORCE_AUDIO_CHANNELS", "0") or "0")
 AUDIO_DEVICE = os.environ.get("AUDIO_DEVICE", "").strip()
 AUDIO_GAIN = float(os.environ.get("AUDIO_GAIN", "1.0"))
 # AUDIO_OUTPUT_RATE = int(os.environ.get("AUDIO_OUTPUT_RATE", "0") or "0")
 AUDIO_OUTPUT_RATE = 48000
-RECORD_AUDIO = os.environ.get("RECORD_AUDIO", "1") == "1"
+RECORD_AUDIO = env_bool("RECORD_AUDIO", True)
+
+
+def build_arg_parser():
+    parser = argparse.ArgumentParser(description="Run the EgoStreamer WebRTC server.")
+    parser.add_argument("--host", default=HOST, help="Host interface to bind.")
+    parser.add_argument("--port", type=int, default=PORT, help="Port to listen on.")
+    parser.add_argument(
+        "--server-base-url",
+        default=SERVER_BASE_URL,
+        help="Public base URL to advertise in logs and QR output.",
+    )
+    parser.add_argument(
+        "--display-video",
+        action=argparse.BooleanOptionalAction,
+        default=DISPLAY_VIDEO,
+        help="Show the incoming video in an OpenCV window.",
+    )
+    parser.add_argument(
+        "--print-qr",
+        action=argparse.BooleanOptionalAction,
+        default=PRINT_QR,
+        help="Print an ASCII QR code for the WebSocket URL.",
+    )
+    parser.add_argument(
+        "--send-mock-bbox",
+        action=argparse.BooleanOptionalAction,
+        default=SEND_MOCK_BBOX,
+        help="Send mock bounding boxes over the detections data channel.",
+    )
+    feedback_group = parser.add_mutually_exclusive_group()
+    feedback_group.add_argument(
+        "--send-mock-feedback",
+        dest="send_mock_feedback",
+        action="store_true",
+        help="Send mock feedback messages over the detections data channel.",
+    )
+    feedback_group.add_argument(
+        "--no-send-mock-feedback",
+        dest="send_mock_feedback",
+        action="store_false",
+        help="Disable mock feedback messages over the detections data channel.",
+    )
+    parser.set_defaults(send_mock_feedback=None)
+    parser.add_argument(
+        "--detection-channel-label",
+        default=DETECTION_CHANNEL_LABEL,
+        help="Data channel label used for detections and mock payloads.",
+    )
+    parser.add_argument(
+        "--play-audio",
+        action=argparse.BooleanOptionalAction,
+        default=PLAY_AUDIO,
+        help="Play incoming audio on the server.",
+    )
+    parser.add_argument(
+        "--force-audio-channels",
+        type=int,
+        choices=[0, 1, 2],
+        default=FORCE_AUDIO_CHANNELS,
+        help="Override output channels: 0=auto, 1=mono, 2=stereo.",
+    )
+    parser.add_argument(
+        "--audio-device",
+        default=AUDIO_DEVICE,
+        help="Audio output device index or name substring.",
+    )
+    parser.add_argument(
+        "--audio-gain",
+        type=float,
+        default=AUDIO_GAIN,
+        help="Playback gain multiplier.",
+    )
+    parser.add_argument(
+        "--record-audio",
+        action=argparse.BooleanOptionalAction,
+        default=RECORD_AUDIO,
+        help="Record incoming audio to a WAV file while receiving it.",
+    )
+    return parser
+
+
+def apply_cli_args(args):
+    global HOST
+    global PORT
+    global SERVER_BASE_URL
+    global DISPLAY_VIDEO
+    global PRINT_QR
+    global SEND_MOCK_BBOX
+    global SEND_MOCK_FEEDBACK
+    global DETECTION_CHANNEL_LABEL
+    global PLAY_AUDIO
+    global FORCE_AUDIO_CHANNELS
+    global AUDIO_DEVICE
+    global AUDIO_GAIN
+    global RECORD_AUDIO
+
+    HOST = args.host
+    PORT = args.port
+    SERVER_BASE_URL = (args.server_base_url or "").strip() or None
+    DISPLAY_VIDEO = args.display_video
+    PRINT_QR = args.print_qr
+    SEND_MOCK_BBOX = args.send_mock_bbox
+    if args.send_mock_feedback is None:
+        SEND_MOCK_FEEDBACK = args.send_mock_bbox if _send_mock_feedback_env is None else SEND_MOCK_FEEDBACK
+    else:
+        SEND_MOCK_FEEDBACK = args.send_mock_feedback
+    DETECTION_CHANNEL_LABEL = args.detection_channel_label
+    PLAY_AUDIO = args.play_audio
+    FORCE_AUDIO_CHANNELS = args.force_audio_channels
+    AUDIO_DEVICE = args.audio_device.strip()
+    AUDIO_GAIN = args.audio_gain
+    RECORD_AUDIO = args.record_audio
 
 
 def get_lan_ip():
@@ -57,7 +179,7 @@ def get_lan_ip():
 
 
 def print_connection_info():
-    base_url = os.environ.get("SERVER_BASE_URL")
+    base_url = SERVER_BASE_URL
     if not base_url:
         base_url = f"http://{get_lan_ip()}:{PORT}"
 
@@ -683,6 +805,8 @@ async def on_shutdown(app):
 
 
 def main():
+    args = build_arg_parser().parse_args()
+    apply_cli_args(args)
     app = web.Application()
     app.router.add_post("/offer", offer)
     app.router.add_get("/ws", websocket_handler)

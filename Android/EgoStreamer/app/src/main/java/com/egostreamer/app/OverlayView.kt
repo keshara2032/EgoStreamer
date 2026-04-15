@@ -5,6 +5,10 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.TextUtils
 import android.util.AttributeSet
 import android.view.View
 import androidx.core.content.ContextCompat
@@ -27,8 +31,7 @@ class OverlayView @JvmOverloads constructor(
 
     data class Feedback(
         val protocol: String = "",
-        val action: String = "",
-        val assistance: String = ""
+        val action: String = ""
     )
 
     private val uvaBlue = ContextCompat.getColor(context, R.color.uva_blue)
@@ -58,15 +61,15 @@ class OverlayView @JvmOverloads constructor(
 
     private val feedbackTitlePaint = Paint().apply {
         style = Paint.Style.FILL
-        textSize = 26f
+        textSize = 22f
         color = uvaOrange
         isAntiAlias = true
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
 
-    private val feedbackContentPaint = Paint().apply {
+    private val feedbackContentPaint = TextPaint().apply {
         style = Paint.Style.FILL
-        textSize = 34f
+        textSize = 26f
         color = 0xFFFFFFFF.toInt()
         isAntiAlias = true
     }
@@ -106,7 +109,7 @@ class OverlayView @JvmOverloads constructor(
             }
             val textWidth = textPaint.measureText(label)
             val textHeight = textPaint.textSize
-            val bgRect = RectF(left, max(0f, top - textHeight - 12f), left + textWidth + 20f, top)
+            val bgRect = RectF(left, max(0f, top - textHeight - 18f), left + textWidth + 16f, top)
             canvas.drawRect(bgRect, bgPaint)
             canvas.drawText(label, left + 10f, top - 10f, textPaint)
         }
@@ -117,43 +120,75 @@ class OverlayView @JvmOverloads constructor(
 
     private fun drawFeedbackElements(canvas: Canvas) {
         val f = feedback ?: return
-        val padding = 40f
-        val boxWidth = width * 0.35f
-        val boxHeight = 140f
+        val padding = width * 0.035f
+        val topY = height * 0.10f
+        val protocolWidth = width * 0.30f
+        val protocolHeight = height * 0.40f
+        val actionWidth = width * 0.46f
+        val actionHeight = height * 0.26f
 
-        // Protocol: Top Left
         if (f.protocol.isNotBlank()) {
-            drawInfoBox(canvas, padding, padding, boxWidth, boxHeight, "PROTOCOL", f.protocol)
+            drawInfoBox(
+                canvas = canvas,
+                x = padding,
+                y = topY,
+                w = protocolWidth,
+                h = protocolHeight,
+                title = "PROTOCOL",
+                content = f.protocol,
+                maxLines = 3
+            )
         }
 
-        // Action: Bottom Left
-        // Adjusted Y position to stay above the new control panel which is roughly 200dp
-        val controlPanelHeight = 250f * resources.displayMetrics.density
         if (f.action.isNotBlank()) {
-            drawInfoBox(canvas, padding, height - padding - boxHeight - controlPanelHeight, boxWidth, boxHeight, "ACTION", f.action)
-        }
-
-        // Assistance: Top Right
-        if (f.assistance.isNotBlank()) {
-            drawInfoBox(canvas, width - padding - boxWidth, padding, boxWidth, boxHeight, "ASSISTANCE", f.assistance)
+            drawInfoBox(
+                canvas = canvas,
+                x = width - padding - actionWidth,
+                y = topY,
+                w = actionWidth,
+                h = actionHeight,
+                title = "ACTIONS",
+                content = f.action,
+                maxLines = 3
+            )
         }
     }
 
-    private fun drawInfoBox(canvas: Canvas, x: Float, y: Float, w: Float, h: Float, title: String, content: String) {
+    private fun drawInfoBox(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float,
+        title: String,
+        content: String,
+        maxLines: Int
+    ) {
         val rect = RectF(x, y, x + w, y + h)
         
-        // Background with slight corner radius
         canvas.drawRoundRect(rect, 24f, 24f, bgPaint)
         
-        // Border
         val borderPaint = Paint(boxPaint).apply { strokeWidth = 3f }
         canvas.drawRoundRect(rect, 24f, 24f, borderPaint)
 
         canvas.drawText(title, x + 24f, y + 48f, feedbackTitlePaint)
-        
-        // Simple text wrapping if content is long
-        val truncatedContent = if (content.length > 35) content.take(32) + "..." else content
-        canvas.drawText(truncatedContent, x + 24f, y + 105f, feedbackContentPaint)
+
+        val contentLayout = StaticLayout.Builder.obtain(
+            content,
+            0,
+            content.length,
+            feedbackContentPaint,
+            max(1, (w - 48f).toInt())
+        )
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .setMaxLines(maxLines)
+            .build()
+
+        canvas.save()
+        canvas.translate(x + 24f, y + 62f)
+        contentLayout.draw(canvas)
+        canvas.restore()
     }
 
     private fun clamp(value: Float, minVal: Float, maxVal: Float): Float {

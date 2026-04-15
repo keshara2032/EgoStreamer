@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_layout"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -27,16 +28,17 @@
         android:id="@+id/status_text"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginBottom="12dp"
         android:background="@drawable/bg_status_badge"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="6dp"
-        android:text="Disconnected"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:text="@string/status_disconnected"
         android:textColor="@color/white"
-        android:textSize="12sp"
+        android:textSize="16sp"
         android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintBottom_toTopOf="@id/control_panel" />
 
     <LinearLayout
         android:id="@+id/control_panel"
@@ -44,69 +46,83 @@
         android:layout_height="wrap_content"
         android:background="@drawable/bg_control_panel"
         android:orientation="vertical"
-        android:padding="20dp"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="18dp"
         app:layout_constraintBottom_toBottomOf="parent">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:baselineAligned="false"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:weightSum="3">
 
-            <EditText
-                android:id="@+id/ws_url_input"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_input_field"
-                android:hint="ws://server-address:8888"
-                android:inputType="textUri"
-                android:paddingHorizontal="16dp"
-                android:textColor="@color/uva_blue"
-                android:textColorHint="@color/uva_blue_25"
-                android:textSize="14sp" />
-
-            <ImageButton
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/scan_button"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="12dp"
-                android:background="@drawable/bg_button_secondary"
-                android:contentDescription="Scan QR"
-                android:padding="10dp"
-                android:scaleType="fitCenter"
-                android:src="@android:drawable/ic_menu_camera"
-                app:tint="@color/uva_orange" />
-        </LinearLayout>
+                android:layout_width="0dp"
+                android:layout_height="68dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/button_fill_scan"
+                android:contentDescription="@string/scan_qr"
+                android:focusable="true"
+                android:gravity="center"
+                android:nextFocusRight="@id/start_button"
+                android:text="@string/scan_qr"
+                android:textAllCaps="true"
+                android:textColor="@color/button_text_scan"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                app:cornerRadius="18dp"
+                app:icon="@android:drawable/ic_menu_camera"
+                app:iconGravity="textStart"
+                app:iconPadding="12dp"
+                app:iconTint="@color/button_text_scan"
+                app:rippleColor="@color/uva_orange_25"
+                app:strokeColor="@color/button_stroke"
+                app:strokeWidth="6dp" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:orientation="horizontal">
-
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/start_button"
                 android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:backgroundTint="@color/uva_orange"
-                android:text="START STREAMING"
-                android:textColor="@color/white"
-                android:textStyle="bold"
-                app:cornerRadius="8dp" />
-
-            <Button
-                android:id="@+id/stop_button"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
+                android:layout_height="68dp"
                 android:layout_marginStart="12dp"
                 android:layout_weight="1"
-                android:backgroundTint="@color/uva_blue"
-                android:text="STOP"
-                android:textColor="@color/white"
+                android:backgroundTint="@color/button_fill_start"
+                android:focusable="true"
+                android:gravity="center"
+                android:nextFocusLeft="@id/scan_button"
+                android:nextFocusRight="@id/stop_button"
+                android:text="@string/start_streaming"
+                android:textAllCaps="true"
+                android:textColor="@color/button_text_primary"
+                android:textSize="20sp"
                 android:textStyle="bold"
-                app:cornerRadius="8dp" />
+                app:cornerRadius="18dp"
+                app:rippleColor="@color/uva_orange_25"
+                app:strokeColor="@color/button_stroke"
+                app:strokeWidth="6dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/stop_button"
+                android:layout_width="0dp"
+                android:layout_height="68dp"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/button_fill_stop"
+                android:focusable="true"
+                android:gravity="center"
+                android:nextFocusLeft="@id/start_button"
+                android:text="@string/stop_streaming"
+                android:textAllCaps="true"
+                android:textColor="@color/button_text_primary"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                app:cornerRadius="18dp"
+                app:rippleColor="@color/uva_orange_25"
+                app:strokeColor="@color/button_stroke_stop"
+                app:strokeWidth="6dp" />
         </LinearLayout>
     </LinearLayout>
 
